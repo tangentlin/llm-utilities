@@ -258,3 +258,121 @@ Some Chrome extensions can interfere. Try with the dedicated profile mode, which
 ### "npx not found"
 
 Install Node.js from [nodejs.org](https://nodejs.org). The LTS version is recommended.
+
+---
+
+## Appendix: Manual Setup (Without This Script)
+
+This section explains what you'd need to do manually to achieve the same result. Understanding these steps helps with debugging and shows what the script automates.
+
+### Step 1: Launch Chrome with Remote Debugging
+
+Chrome must be started with a special flag to expose its DevTools protocol:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222
+```
+
+**Why:** The `--remote-debugging-port` flag tells Chrome to listen on the specified port (9222) for DevTools Protocol connections. Without this flag, external tools cannot connect to Chrome.
+
+**Caveat:** If Chrome is already running, this command opens a new window but the debug port won't be active. You must quit Chrome completely first, then launch with the flag.
+
+### Step 2: Use a Dedicated Profile (Optional but Recommended)
+
+To run a separate debug instance alongside your regular Chrome:
+
+```bash
+"/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+  --remote-debugging-port=9222 \
+  --user-data-dir="$HOME/.chrome-debug-profile"
+```
+
+**Why:** The `--user-data-dir` flag creates an isolated Chrome profile. This lets you run a debug Chrome instance separately from your main Chrome (with all your tabs and logins). Without this, you can only have one Chrome instance at a time.
+
+**Trade-off:** A new profile starts fresh — no bookmarks, extensions, or saved logins. You'll need to sign into sites again.
+
+### Step 3: Verify Chrome is Listening
+
+Check that Chrome is accepting debug connections:
+
+```bash
+curl http://127.0.0.1:9222/json/version
+```
+
+**Expected output:** JSON with Chrome version info, like:
+```json
+{
+  "Browser": "Chrome/120.0.6099.109",
+  "Protocol-Version": "1.3",
+  "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/..."
+}
+```
+
+**Why:** This endpoint is part of the Chrome DevTools Protocol. If you get a connection refused error, Chrome isn't running with debug mode.
+
+### Step 4: List Open Tabs
+
+```bash
+curl http://127.0.0.1:9222/json/list
+```
+
+**Why:** Returns a JSON array of all debuggable targets (tabs). The MCP server uses this to enumerate what's available.
+
+### Step 5: Configure Claude Code MCP Server
+
+Register the Chrome DevTools MCP server with Claude Code:
+
+```bash
+claude mcp add --transport stdio --scope user chrome-devtools -- \
+  npx -y chrome-devtools-mcp@latest --browserUrl="http://127.0.0.1:9222"
+```
+
+**Breaking down the command:**
+
+| Part | Purpose |
+|------|---------|
+| `claude mcp add` | Registers a new MCP server with Claude Code |
+| `--transport stdio` | Communication via standard input/output (not HTTP) |
+| `--scope user` | Available across all projects (vs. `--scope project` for just one repo) |
+| `chrome-devtools` | Name you'll see in `/mcp` command |
+| `--` | Separator between Claude options and the actual command |
+| `npx -y chrome-devtools-mcp@latest` | Runs the MCP server package (auto-installs if needed) |
+| `--browserUrl="http://127.0.0.1:9222"` | Tells the MCP server where Chrome is listening |
+
+### Step 6: Verify MCP Configuration
+
+```bash
+claude mcp get chrome-devtools
+```
+
+**Expected output:** Shows the configured command and arguments.
+
+### Step 7: Test the Connection
+
+In Claude Code, run:
+
+```
+/mcp
+```
+
+Look for `chrome-devtools` with a green "Connected" status.
+
+Then try a test prompt:
+
+```
+List all open Chrome tabs using the chrome-devtools MCP.
+```
+
+### What the Script Automates
+
+| Manual Step | What the Script Does |
+|-------------|---------------------|
+| Find Chrome binary path | Auto-detects common installation locations |
+| Quit existing Chrome before launching | Prompts and handles gracefully with tab restoration |
+| Remember the debug port | Saves to config file |
+| Type the long launch command | Creates a simple `chrome-debug` function |
+| Check if debug is already running | Detects port in use before launching |
+| Configure MCP with correct port | Auto-runs `claude mcp add` with matching port |
+| Restart shell to load functions | Reminds you and provides the source command |
+| Remember all the verification steps | `chrome-debug-status` shows everything at once |
